@@ -8,6 +8,7 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   body {
     background: #f9fafb;
@@ -22,14 +23,22 @@
 const { useState, useEffect, useRef } = React;
 const { jsPDF } = window.jspdf;
 
+// REPLACE THESE 3 with your EmailJS keys. Leave blank if you don't want email yet
+const EMAILJS_PUBLIC_KEY = "";
+const EMAILJS_SERVICE_ID = "";
+const EMAILJS_TEMPLATE_ID = "";
+
 function App() {
-  const [view, setView] = useState('dashboard'); // dashboard, editor
+  const [view, setView] = useState('dashboard');
   const [invoices, setInvoices] = useState([]);
   const [editingInvoice, setEditingInvoice] = useState(null);
+  const [sending, setSending] = useState(false);
   const invoiceRef = useRef();
 
-  // Load from localStorage like your CliniqueConnect app
   useEffect(() => {
+    if (EMAILJS_PUBLIC_KEY && window.emailjs) {
+      emailjs.init(EMAILJS_PUBLIC_KEY);
+    }
     const saved = localStorage.getItem('twins_invoices');
     if (saved) setInvoices(JSON.parse(saved));
   }, []);
@@ -43,6 +52,7 @@ function App() {
     regNo: "2024/444303/07",
     vatNo: "9819040198",
     email: "info@twinscooperate.co.za",
+    phone: "069 894 9596",
     bankName: "Standard Bank",
     accountNumber: "10 26 459 443 4",
     branchCode: "006145",
@@ -99,12 +109,87 @@ function App() {
     return { subtotal, tax, total, balanceDue };
   };
 
-  const downloadPDF = async (inv) => {
+  const generatePDFBlob = async (inv) => {
     setEditingInvoice({...inv});
     await new Promise(r => setTimeout(r, 200));
     const doc = new jsPDF('p', 'mm', 'a4');
     await doc.html(invoiceRef.current, { x: 0, y: 0, width: 210, windowWidth: 800 });
-    doc.save(`${inv.invoiceNumber}.pdf`);
+    return doc.output('blob');
+  };
+
+  const downloadPDF = async (inv) => {
+    const blob = await generatePDFBlob(inv);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${inv.invoiceNumber}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Share function - uses Web Share API like your CliniqueConnect WhatsApp button
+  const shareInvoice = async (inv) => {
+    const { balanceDue } = calculateTotal(inv);
+    const message = `Invoice ${inv.invoiceNumber} from ${companyInfo.name}\nClient: ${inv.clientName}\nAmount Due: ZAR ${balanceDue.toFixed(2)}\n\nSent via Twinz Invoice Manager`;
+
+    // Try native share with file attachment first
+    if (navigator.share && navigator.canShare) {
+      try {
+        const pdfBlob = await generatePDFBlob(inv);
+        const file = new File([pdfBlob], `${inv.invoiceNumber}.pdf`, { type: 'application/pdf' });
+        if (navigator.canShare({ files: })) {
+          await navigator.share({
+            files:,
+            title: `Invoice ${inv.invoiceNumber}`,
+            text: message
+          });
+          return;
+        }
+      } catch (err) {
+        console.log('Share failed, falling back to WhatsApp');
+      }
+    }
+
+    // Fallback: WhatsApp like your reportIssue function
+    const waMsg = encodeURIComponent(message);
+    window.open(`https://wa.me/?text=${waMsg}`, '_blank');
+    alert("PDF will download. Attach it to WhatsApp.");
+    await downloadPDF(inv);
+  };
+
+  const sendEmail = async (inv) => {
+    if (!EMAILJS_PUBLIC_KEY) {
+      alert("Add your EmailJS keys first to enable email sending");
+      return;
+    }
+    if (!inv.clientEmail) {
+      alert("Add client email first");
+      return;
+    }
+    setSending(true);
+    try {
+      const pdfBlob = await generatePDFBlob(inv);
+      const reader = new FileReader();
+      reader.readAsDataURL(pdfBlob);
+      reader.onloadend = async () => {
+        const base64data = reader.result;
+        const { balanceDue } = calculateTotal(inv);
+        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+          to_email: inv.clientEmail,
+          to_name: inv.clientName,
+          from_name: companyInfo.name,
+          invoice_number: inv.invoiceNumber,
+          amount: balanceDue.toFixed(2),
+          message: inv.notes,
+          attachment: base64data
+        });
+        alert(`Invoice sent to ${inv.clientEmail}`);
+        setSending(false);
+      };
+    } catch (err) {
+      alert("Failed to send: " + err.message);
+      setSending(false);
+    }
   };
 
   const updateItem = (i, field, value) => {
@@ -115,7 +200,7 @@ function App() {
 
   const addItem = () => {
     setEditingInvoice({
-     ...editingInvoice,
+    ...editingInvoice,
       items: [...editingInvoice.items, { desc: "", qty: 1, rate: 0, taxable: true, discount: 0, notes: "" }]
     });
   };
@@ -149,7 +234,7 @@ function App() {
           )
         :
           React.createElement('div', {className: "bg-white rounded-xl shadow overflow-x-auto"},
-            React.createElement('table', {className: "w-full min-w-[600px]"},
+            React.createElement('table', {className: "w-full min-w-[700px]"},
               React.createElement('thead', {className: "bg-gray-50 text-left"},
                 React.createElement('tr', null,
                   ['Invoice #', 'Client', 'Date', 'Amount', 'Status', 'Actions'].map(h =>
@@ -174,9 +259,13 @@ function App() {
                         }`
                       }, inv.status)
                     ),
-                    React.createElement('td', {className: "p-4 space-x-2"},
+                    React.createElement('td', {className: "p-4 space-x-2 whitespace-nowrap"},
                       React.createElement('button', {onClick: () => editInvoice(inv), className: "text-blue-600 hover:underline text-sm"}, "Edit"),
                       React.createElement('button', {onClick: () => downloadPDF(inv), className: "text-gray-600 hover:underline text-sm"}, "PDF"),
+                      React.createElement('button', {onClick: () => shareInvoice(inv), className: "text-green-600 hover:underline text-sm"}, "Share"),
+                      React.createElement('button', {onClick: () => sendEmail(inv), disabled: sending, className: "text-purple-600 hover:underline text-sm disabled:opacity-50"},
+                        sending? "Sending..." : "Email"
+                      ),
                       React.createElement('button', {onClick: () => deleteInvoice(inv.id), className: "text-red-600 hover:underline text-sm"}, "Delete")
                     )
                   );
@@ -201,7 +290,6 @@ function App() {
 
     React.createElement('div', {className: "max-w-6xl mx-auto p-4 md:p-6 grid lg:grid-cols-2 gap-6"},
 
-      // Left: Form
       React.createElement('div', {className: "space-y-4"},
         React.createElement('div', {className: "bg-white rounded-xl shadow p-6"},
           React.createElement('h3', {className: "font-semibold mb-4"}, "Client Details"),
@@ -266,7 +354,6 @@ function App() {
         )
       ),
 
-      // Right: Live Preview for PDF
       React.createElement('div', {className: "bg-white rounded-xl shadow p-6 sticky top-24 h-fit"},
         React.createElement('div', {ref: invoiceRef},
           React.createElement('div', {className: "flex justify-between mb-8"},
