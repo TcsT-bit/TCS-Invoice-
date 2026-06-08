@@ -9,21 +9,40 @@
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { getFirestore, collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyAPVx4oSNh0QC30mXJg6cXvBCMVtPywwPY",
+    authDomain: "twinz-invoice-manager.firebaseapp.com",
+    projectId: "twinz-invoice-manager",
+    storageBucket: "twinz-invoice-manager.firebasestorage.app",
+    messagingSenderId: "1041968611045",
+    appId: "1:1041968611045:web:1012514ccdfac280865e0c",
+    measurementId: "G-HR6582B37G"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  window.db = getFirestore(app);
+  window.firestore = { collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy };
+</script>
+
 <style>
-  body {
-    background: #f9fafb;
-    font-family: 'Inter', system-ui, sans-serif;
-  }
+  body { background: #f9fafb; font-family: 'Inter', system-ui, sans-serif; }
 </style>
 </head>
 <body>
-<div id="root"></div>
+<div id="root">Loading...</div>
 
 <script>
 const { useState, useEffect, useRef } = React;
 const { jsPDF } = window.jspdf;
+const { collection, addDoc, doc, updateDoc, deleteDoc, onSnapshot, query, orderBy } = window.firestore;
 
-// REPLACE THESE 3 with your EmailJS keys. Leave blank if you don't want email yet
+// EmailJS keys - leave blank to disable email
 const EMAILJS_PUBLIC_KEY = "";
 const EMAILJS_SERVICE_ID = "";
 const EMAILJS_TEMPLATE_ID = "";
@@ -32,6 +51,7 @@ function App() {
   const [view, setView] = useState('dashboard');
   const [invoices, setInvoices] = useState([]);
   const [editingInvoice, setEditingInvoice] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const invoiceRef = useRef();
 
@@ -39,15 +59,23 @@ function App() {
     if (EMAILJS_PUBLIC_KEY && window.emailjs) {
       emailjs.init(EMAILJS_PUBLIC_KEY);
     }
-    const saved = localStorage.getItem('twins_invoices');
-    if (saved) setInvoices(JSON.parse(saved));
   }, []);
 
   useEffect(() => {
-    localStorage.setItem('twins_invoices', JSON.stringify(invoices));
-  }, [invoices]);
+    const q = query(collection(window.db, "invoices"), orderBy("createdAt", "desc"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const invs = snapshot.docs.map(doc => ({ id: doc.id,...doc.data() }));
+      setInvoices(invs);
+      setLoading(false);
+    }, (error) => {
+      console.error("Firestore error:", error);
+      alert("Firestore error: " + error.message);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
 
-  const [companyInfo] = useState({
+  const companyInfo = {
     name: "Twinz Cooperate Services Pty Ltd",
     regNo: "2024/444303/07",
     vatNo: "9819040198",
@@ -56,14 +84,13 @@ function App() {
     bankName: "Standard Bank",
     accountNumber: "10 26 459 443 4",
     branchCode: "006145",
-    logo: null,
+    logo: "attachment://27153008644351149",
     terms: "Storage fees are charged after 7 business days grace period following the completion of work."
-  });
+  };
 
   const createNewInvoice = () => {
     const newInv = {
-      id: Date.now(),
-      invoiceNumber: `INV-${String(invoices.length + 1).padStart(3, '0')}`,
+      invoiceNumber: `INV-${Date.now().toString().slice(-4)}`,
       invoiceDate: new Date().toISOString().split('T')[0],
       dueDate: "",
       status: "Unpaid",
@@ -74,46 +101,52 @@ function App() {
       clientAddress: "",
       items: [{ desc: "", qty: 1, rate: 0, taxable: true, discount: 0, notes: "" }],
       taxRate: 15,
-      notes: "Quotation accepted refer to Ts & Cs below"
+      notes: "Quotation accepted refer to Ts & Cs below",
+      createdAt: Date.now()
     };
     setEditingInvoice(newInv);
     setView('editor');
   };
 
-  const saveInvoice = () => {
-    if (invoices.find(i => i.id === editingInvoice.id)) {
-      setInvoices(invoices.map(i => i.id === editingInvoice.id? editingInvoice : i));
-    } else {
-      setInvoices([editingInvoice,...invoices]);
+  const saveInvoice = async () => {
+    try {
+      if (editingInvoice.id && typeof editingInvoice.id === 'string') {
+        const docRef = doc(window.db, "invoices", editingInvoice.id);
+        await updateDoc(docRef, editingInvoice);
+      } else {
+        await addDoc(collection(window.db, "invoices"), editingInvoice);
+      }
+      setView('dashboard');
+    } catch (e) {
+      alert('Save failed: ' + e.message);
     }
-    setView('dashboard');
   };
 
-  const deleteInvoice = (id) => {
+  const deleteInvoice = async (id) => {
     if (confirm("Delete this invoice?")) {
-      setInvoices(invoices.filter(i => i.id!== id));
+      await deleteDoc(doc(window.db, "invoices", id));
     }
   };
 
   const editInvoice = (inv) => {
-    setEditingInvoice({...inv});
+    setEditingInvoice(JSON.parse(JSON.stringify(inv)));
     setView('editor');
   };
 
   const calculateTotal = (inv) => {
-    const subtotal = inv.items.reduce((sum, i) => sum + i.qty * i.rate * (1 - i.discount/100), 0);
-    const taxableAmount = inv.items.filter(i => i.taxable).reduce((sum, i) => sum + i.qty * i.rate * (1 - i.discount/100), 0);
-    const tax = taxableAmount * (inv.taxRate / 100);
-    const total = subtotal + tax;
-    const balanceDue = Math.max(0, total - inv.receivedAmount);
-    return { subtotal, tax, total, balanceDue };
+    if (!inv ||!inv.items) return { subtotal: 0, tax: 0, balanceDue: 0 };
+    const subtotal = inv.items.reduce((sum, i) => sum + (i.qty || 0) * (i.rate || 0) * (1 - (i.discount || 0)/100), 0);
+    const taxableAmount = inv.items.filter(i => i.taxable).reduce((sum, i) => sum + (i.qty || 0) * (i.rate || 0) * (1 - (i.discount || 0)/100), 0);
+    const tax = taxableAmount * ((inv.taxRate || 15) / 100);
+    const balanceDue = Math.max(0, subtotal + tax - (inv.receivedAmount || 0));
+    return { subtotal, tax, balanceDue };
   };
 
   const generatePDFBlob = async (inv) => {
-    setEditingInvoice({...inv});
-    await new Promise(r => setTimeout(r, 200));
+    setEditingInvoice(JSON.parse(JSON.stringify(inv)));
+    await new Promise(r => setTimeout(r, 300));
     const doc = new jsPDF('p', 'mm', 'a4');
-    await doc.html(invoiceRef.current, { x: 0, y: 0, width: 210, windowWidth: 800 });
+    await doc.html(invoiceRef.current, { x: 10, y: 10, width: 190, windowWidth: 800 });
     return doc.output('blob');
   };
 
@@ -127,30 +160,9 @@ function App() {
     URL.revokeObjectURL(url);
   };
 
-  // Share function - uses Web Share API like your CliniqueConnect WhatsApp button
   const shareInvoice = async (inv) => {
     const { balanceDue } = calculateTotal(inv);
-    const message = `Invoice ${inv.invoiceNumber} from ${companyInfo.name}\nClient: ${inv.clientName}\nAmount Due: ZAR ${balanceDue.toFixed(2)}\n\nSent via Twinz Invoice Manager`;
-
-    // Try native share with file attachment first
-    if (navigator.share && navigator.canShare) {
-      try {
-        const pdfBlob = await generatePDFBlob(inv);
-        const file = new File([pdfBlob], `${inv.invoiceNumber}.pdf`, { type: 'application/pdf' });
-        if (navigator.canShare({ files: })) {
-          await navigator.share({
-            files:,
-            title: `Invoice ${inv.invoiceNumber}`,
-            text: message
-          });
-          return;
-        }
-      } catch (err) {
-        console.log('Share failed, falling back to WhatsApp');
-      }
-    }
-
-    // Fallback: WhatsApp like your reportIssue function
+    const message = `Invoice ${inv.invoiceNumber} from ${companyInfo.name}\nClient: ${inv.clientName}\nAmount Due: ZAR ${balanceDue.toFixed(2)}`;
     const waMsg = encodeURIComponent(message);
     window.open(`https://wa.me/?text=${waMsg}`, '_blank');
     alert("PDF will download. Attach it to WhatsApp.");
@@ -159,7 +171,7 @@ function App() {
 
   const sendEmail = async (inv) => {
     if (!EMAILJS_PUBLIC_KEY) {
-      alert("Add your EmailJS keys first to enable email sending");
+      alert("Add your EmailJS keys first");
       return;
     }
     if (!inv.clientEmail) {
@@ -194,13 +206,13 @@ function App() {
 
   const updateItem = (i, field, value) => {
     const newItems = [...editingInvoice.items];
-    newItems[i][field] = field === 'desc' || field === 'notes'? value : Number(value);
+    newItems[i][field] = field === 'desc' || field === 'notes'? value : Number(value) || 0;
     setEditingInvoice({...editingInvoice, items: newItems});
   };
 
   const addItem = () => {
     setEditingInvoice({
-    ...editingInvoice,
+     ...editingInvoice,
       items: [...editingInvoice.items, { desc: "", qty: 1, rate: 0, taxable: true, discount: 0, notes: "" }]
     });
   };
@@ -209,7 +221,8 @@ function App() {
     setEditingInvoice({...editingInvoice, items: editingInvoice.items.filter((_, idx) => idx!== i)});
   };
 
-  // Dashboard View
+  if (loading) return React.createElement('div', {className: "min-h-screen flex items-center justify-center"}, "Loading invoices...");
+
   if (view === 'dashboard') {
     return React.createElement('div', {className: "min-h-screen p-4 md:p-6"},
       React.createElement('div', {className: "max-w-6xl mx-auto"},
@@ -223,7 +236,6 @@ function App() {
             className: "bg-black text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-800 w-full sm:w-auto"
           }, "+ Create Invoice")
         ),
-
         invoices.length === 0?
           React.createElement('div', {className: "bg-white rounded-xl shadow p-12 text-center"},
             React.createElement('p', {className: "text-gray-500 mb-4"}, "No invoices yet"),
@@ -277,8 +289,8 @@ function App() {
     );
   }
 
-  // Editor View
-  const { subtotal, tax, balanceDue } = calculateTotal(editingInvoice);
+  if (!editingInvoice) return null;
+  const { balanceDue } = calculateTotal(editingInvoice);
 
   return React.createElement('div', {className: "min-h-screen"},
     React.createElement('div', {className: "bg-white shadow-sm sticky top-0 z-10"},
@@ -287,9 +299,7 @@ function App() {
         React.createElement('button', {onClick: saveInvoice, className: "bg-black text-white px-6 py-2 rounded-lg font-medium"}, "Save Invoice")
       )
     ),
-
     React.createElement('div', {className: "max-w-6xl mx-auto p-4 md:p-6 grid lg:grid-cols-2 gap-6"},
-
       React.createElement('div', {className: "space-y-4"},
         React.createElement('div', {className: "bg-white rounded-xl shadow p-6"},
           React.createElement('h3', {className: "font-semibold mb-4"}, "Client Details"),
@@ -314,7 +324,6 @@ function App() {
             })
           )
         ),
-
         React.createElement('div', {className: "bg-white rounded-xl shadow p-6"},
           React.createElement('h3', {className: "font-semibold mb-4"}, "Items"),
           editingInvoice.items.map((item, i) =>
@@ -353,11 +362,11 @@ function App() {
           }, "Add Item")
         )
       ),
-
       React.createElement('div', {className: "bg-white rounded-xl shadow p-6 sticky top-24 h-fit"},
         React.createElement('div', {ref: invoiceRef},
           React.createElement('div', {className: "flex justify-between mb-8"},
             React.createElement('div', null,
+              companyInfo.logo && React.createElement('img', {src: companyInfo.logo, className: "h-12 mb-2"}),
               React.createElement('h2', {className: "text-xl font-bold"}, companyInfo.name),
               React.createElement('p', {className: "text-sm text-gray-600"}, `Reg: ${companyInfo.regNo}`)
             ),
@@ -366,12 +375,10 @@ function App() {
               React.createElement('p', {className: "text-gray-600"}, `#${editingInvoice.invoiceNumber}`)
             )
           ),
-
           React.createElement('div', {className: "mb-6"},
             React.createElement('p', {className: "text-sm text-gray-500"}, "Bill To"),
             React.createElement('p', {className: "font-semibold"}, editingInvoice.clientName || 'Client Name')
           ),
-
           React.createElement('table', {className: "w-full text-sm mb-6"},
             React.createElement('thead', {className: "bg-gray-50"},
               React.createElement('tr', null,
@@ -392,7 +399,6 @@ function App() {
               )
             )
           ),
-
           React.createElement('div', {className: "flex justify-end"},
             React.createElement('div', {className: "w-64 space-y-2"},
               React.createElement('div', {className: "flex justify-between font-bold border-t pt-2"},
