@@ -8,11 +8,11 @@
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   body { font-family: 'Inter', sans-serif; }
-  @media print {.no-print { display: none; }}
+ .no-print { }
+  @media print {.no-print { display: none; }
 </style>
 </head>
 <body class="bg-gray-50">
@@ -22,24 +22,17 @@
 const { useState, useEffect, useRef } = React;
 const { jsPDF } = window.jspdf;
 
-// REPLACE THESE 3 LINES
-const EMAILJS_PUBLIC_KEY = "YOUR_PUBLIC_KEY";
-const EMAILJS_SERVICE_ID = "YOUR_SERVICE_ID";
-const EMAILJS_TEMPLATE_ID = "YOUR_TEMPLATE_ID";
-
 function App() {
   const [view, setView] = useState('dashboard');
   const [invoices, setInvoices] = useState([]);
   const [editingInvoice, setEditingInvoice] = useState(null);
-  const [sending, setSending] = useState(false);
   const invoiceRef = useRef();
 
+  // Load/save from localStorage
   useEffect(() => {
-    emailjs.init(EMAILJS_PUBLIC_KEY);
-
     const saved = localStorage.getItem('twins_invoices');
     if (saved) setInvoices(JSON.parse(saved));
-
+    
     const company = localStorage.getItem('twins_company');
     if (company) setCompanyInfo(JSON.parse(company));
   }, []);
@@ -57,7 +50,7 @@ function App() {
     regNo: "2024/444303/07",
     vatNo: "9819040198",
     address: "",
-    email: "info@twinscooperate.co.za",
+    email: "",
     phone: "",
     bankName: "Standard Bank",
     accountNumber: "10 26 459 443 4",
@@ -115,67 +108,28 @@ function App() {
     return { subtotal, tax, total, balanceDue };
   };
 
-  const generatePDFBlob = async (inv) => {
+  const generatePDF = async (inv) => {
     setEditingInvoice({...inv});
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 200));
     const doc = new jsPDF('p', 'mm', 'a4');
     await doc.html(invoiceRef.current, { x: 0, y: 0, width: 210, windowWidth: 800 });
-    return doc.output('blob');
+    return doc;
   };
 
   const downloadPDF = async (inv) => {
-    const blob = await generatePDFBlob(inv);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${inv.invoiceNumber}_${inv.clientName || 'Invoice'}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const sendEmail = async (inv) => {
-    if (!inv.clientEmail) {
-      alert("Add client email first");
-      return;
-    }
-    setSending(true);
-    try {
-      const pdfBlob = await generatePDFBlob(inv);
-
-      const reader = new FileReader();
-      reader.readAsDataURL(pdfBlob);
-      reader.onloadend = async () => {
-        const base64data = reader.result;
-        const { balanceDue } = calculateTotal(inv);
-
-        await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
-          to_email: inv.clientEmail,
-          to_name: inv.clientName,
-          from_name: companyInfo.name,
-          invoice_number: inv.invoiceNumber,
-          amount: balanceDue.toFixed(2),
-          message: inv.notes,
-          attachment: base64data
-        });
-
-        alert(`Invoice sent to ${inv.clientEmail}`);
-        setSending(false);
-      };
-    } catch (err) {
-      alert("Failed to send: " + err.message);
-      setSending(false);
-    }
+    const doc = await generatePDF(inv);
+    doc.save(`${inv.invoiceNumber}_${inv.clientName || 'Invoice'}.pdf`);
   };
 
   const shareWhatsApp = async (inv) => {
     const { balanceDue } = calculateTotal(inv);
     const message = `Invoice ${inv.invoiceNumber} from ${companyInfo.name}\nClient: ${inv.clientName}\nAmount Due: ZAR ${balanceDue.toFixed(2)}`;
-
+    
     if (navigator.share && navigator.canShare) {
       try {
-        const pdfBlob = await generatePDFBlob(inv);
+        const pdfBlob = await (await generatePDF(inv)).output('blob');
         const file = new File([pdfBlob], `Invoice-${inv.invoiceNumber}.pdf`, { type: 'application/pdf' });
-        await navigator.share({ files:, title: `Invoice ${inv.invoiceNumber}`, text: message });
+        await navigator.share({ files: [file], title: `Invoice ${inv.invoiceNumber}`, text: message });
         return;
       } catch {}
     }
@@ -206,7 +160,7 @@ function App() {
             className: "bg-black text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-800 w-full sm:w-auto"
           }, "+ Create Invoice")
         ),
-
+        
         invoices.length === 0?
           React.createElement('div', {className: "bg-white rounded-xl shadow p-12 text-center"},
             React.createElement('p', {className: "text-gray-500 mb-4"}, "No invoices yet"),
@@ -217,7 +171,7 @@ function App() {
           )
         :
           React.createElement('div', {className: "bg-white rounded-xl shadow overflow-x-auto"},
-            React.createElement('table', {className: "w-full min-w-[700px]"},
+            React.createElement('table', {className: "w-full min-w-[600px]"},
               React.createElement('thead', {className: "bg-gray-50 text-left"},
                 React.createElement('tr', null,
                   ['Invoice #', 'Client', 'Date', 'Amount', 'Status', 'Actions'].map(h =>
@@ -242,14 +196,10 @@ function App() {
                         }`
                       }, inv.status)
                     ),
-                    React.createElement('td', {className: "p-4 space-x-2 whitespace-nowrap"},
+                    React.createElement('td', {className: "p-4 space-x-3"},
                       React.createElement('button', {onClick: () => editInvoice(inv), className: "text-blue-600 hover:underline text-sm"}, "Edit"),
                       React.createElement('button', {onClick: () => downloadPDF(inv), className: "text-gray-600 hover:underline text-sm"}, "PDF"),
-                      React.createElement('button', {onClick: () => shareWhatsApp(inv), className: "text-green-600 hover:underline text-sm"}, "WhatsApp"),
-                      React.createElement('button', {onClick: () => sendEmail(inv), disabled: sending, className: "text-purple-600 hover:underline text-sm disabled:opacity-50"},
-                        sending? "Sending..." : "Email"
-                      ),
-                      React.createElement('button', {onClick: () => deleteInvoice(inv.id), className: "text-red-600 hover:underline text-sm"}, "Delete")
+                      React.createElement('button', {onClick: () => shareWhatsApp(inv), className: "text-green-600 hover:underline text-sm"}, "Share")
                     )
                   );
                 })
@@ -269,7 +219,7 @@ function App() {
 
   const addItem = () => {
     setEditingInvoice({
-    ...editingInvoice,
+     ...editingInvoice,
       items: [...editingInvoice.items, { desc: "", qty: 1, rate: 0, taxable: true, discount: 0, notes: "" }]
     });
   };
@@ -289,9 +239,11 @@ function App() {
     ),
 
     React.createElement('div', {className: "max-w-6xl mx-auto p-4 md:p-6 grid lg:grid-cols-2 gap-6"},
-
+      
+      // Left: Editor
       React.createElement('div', {className: "space-y-4 no-print"},
-
+        
+        // Company Settings
         React.createElement('div', {className: "bg-white rounded-xl shadow p-6"},
           React.createElement('h3', {className: "font-semibold mb-4"}, "Company Settings"),
           React.createElement('div', {className: "mb-4"},
@@ -312,6 +264,7 @@ function App() {
           )
         ),
 
+        // Client Info
         React.createElement('div', {className: "bg-white rounded-xl shadow p-6"},
           React.createElement('h3', {className: "font-semibold mb-4"}, "Client Details"),
           React.createElement('input', {placeholder: "Client Name", value: editingInvoice.clientName,
@@ -324,12 +277,10 @@ function App() {
             React.createElement('input', {placeholder: "Phone", value: editingInvoice.clientPhone,
               onChange: e => setEditingInvoice({...editingInvoice, clientPhone: e.target.value}),
               className: "border p-3 rounded-lg"})
-          ),
-          React.createElement('input', {placeholder: "Address", value: editingInvoice.clientAddress,
-            onChange: e => setEditingInvoice({...editingInvoice, clientAddress: e.target.value}),
-            className: "w-full border p-3 rounded-lg mt-3"})
+          )
         ),
 
+        // Items - like your screenshot
         React.createElement('div', {className: "bg-white rounded-xl shadow p-6"},
           React.createElement('h3', {className: "font-semibold mb-4"}, "Items"),
           editingInvoice.items.map((item, i) =>
@@ -337,7 +288,7 @@ function App() {
               React.createElement('input', {placeholder: "Item or service provided", value: item.desc,
                 onChange: e => updateItem(i, 'desc', e.target.value),
                 className: "w-full border-b pb-2 mb-3 focus:outline-none"}),
-
+              
               React.createElement('textarea', {placeholder: "Notes (optional)", value: item.notes,
                 onChange: e => updateItem(i, 'notes', e.target.value),
                 className: "w-full text-sm text-gray-600 mb-3 focus:outline-none", rows: 2}),
@@ -381,6 +332,7 @@ function App() {
         )
       ),
 
+      // Right: Live Preview
       React.createElement('div', {className: "bg-white rounded-xl shadow p-6 md:p-8 sticky top-24 h-fit"},
         React.createElement('div', {ref: invoiceRef},
           React.createElement('div', {className: "flex justify-between mb-8"},
@@ -394,7 +346,7 @@ function App() {
               React.createElement('p', {className: "text-gray-600"}, `#${editingInvoice.invoiceNumber}`)
             )
           ),
-
+          
           React.createElement('div', {className: "mb-6"},
             React.createElement('p', {className: "text-sm text-gray-500"}, "Bill To"),
             React.createElement('p', {className: "font-semibold"}, editingInvoice.clientName || 'Client Name'),
@@ -433,7 +385,7 @@ function App() {
               ),
               React.createElement('div', {className: "flex justify-between"},
                 React.createElement('span', null, `VAT ${editingInvoice.taxRate}%`),
-                React.createElement('span', {className: "text-right"}, `ZAR ${tax.toFixed(2)}`)
+                React.createElement('span', null, `ZAR ${tax.toFixed(2)}`)
               ),
               React.createElement('div', {className: "flex justify-between font-bold border-t pt-2"},
                 React.createElement('span', null, "Balance Due"),
