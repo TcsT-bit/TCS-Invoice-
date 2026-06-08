@@ -22,13 +22,9 @@
 const { useState, useRef } = React;
 const { jsPDF } = window.jspdf;
 
-// REPLACE THIS with your logo base64.
-// To get it: open the image in browser, right-click > Open Image in New Tab > use an online image to base64 converter
-const LOGO_BASE64 = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD...";
-
 function App() {
   const invoiceRef = useRef();
-  const [mode, setMode] = useState('edit');
+  const [mode, setMode] = useState('edit'); // start in edit mode so form shows
   const [invoice, setInvoice] = useState({
     company: "Twinz Cooperate Services Pty Ltd",
     companyReg: "2024/444303/07",
@@ -39,12 +35,12 @@ function App() {
     bankName: "Standard Bank",
     accountNumber: "10 26 459 443 4",
     branchCode: "006145",
-    logo: LOGO_BASE64,
+    logo: null,
 
     invoiceNumber: "042",
     invoiceDate: "2024-03-21",
     dueDate: "",
-    status: "Unpaid", // Unpaid, Paid, Partially Paid
+    status: "Unpaid",
     receivedAmount: 0,
 
     clientName: "",
@@ -87,10 +83,10 @@ function App() {
   };
 
   const shareWhatsApp = async () => {
-    const message = `Invoice ${invoice.invoiceNumber} from ${invoice.company}\nClient: ${invoice.clientName}\nAmount Due: ZAR ${balanceDue.toFixed(2)}\n\nPlease find the attached invoice PDF.`;
+    const message = `Invoice ${invoice.invoiceNumber} from ${invoice.company}\nClient: ${invoice.clientName}\nAmount Due: ZAR ${balanceDue.toFixed(2)}`;
     const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
-    alert("PDF will download. Attach it manually to the WhatsApp chat that opens.");
+    alert("PDF will download. Attach it to the WhatsApp chat.");
     await downloadPDF();
   };
 
@@ -99,7 +95,7 @@ function App() {
     const body = `Dear ${invoice.clientName},\n\nPlease find attached invoice ${invoice.invoiceNumber} for ZAR ${balanceDue.toFixed(2)}.\n\nThank you,\n${invoice.company}`;
     const mailto = `mailto:${invoice.clientEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     window.location.href = mailto;
-    alert("PDF will download. Attach it to the email that opens.");
+    alert("PDF will download. Attach it to the email.");
     await downloadPDF();
   };
 
@@ -117,8 +113,8 @@ function App() {
           <h1 className="text-2xl font-bold text-gray-800">Invoice Generator</h1>
           <div className="flex flex-wrap gap-2">
             <button onClick={() => setMode(mode === 'edit'? 'preview' : 'edit')}
-              className="px-4 py-2 rounded-lg border bg-white hover:bg-gray-50">
-              {mode === 'edit'? 'Preview' : 'Edit'}
+              className="px-4 py-2 rounded-lg border bg-white hover:bg-gray-50 font-medium">
+              {mode === 'edit'? 'Switch to Preview' : 'Switch to Edit'}
             </button>
             <button onClick={downloadPDF}
               className="px-4 py-2 rounded-lg bg-black text-white hover:bg-gray-800">
@@ -274,10 +270,14 @@ function App() {
         </div>
       </div>
 
-      {/* Edit Form */}
+      {/* Edit Form - This is the "create" section */}
       {mode === 'edit' && (
         <div className="max-w-5xl mx-auto px-6 mt-8 no-print">
           <div className="bg-white shadow rounded-xl p-6 space-y-6">
+
+            <div className="bg-blue-50 border-blue-200 p-3 rounded-lg">
+              <p className="text-sm text-blue-800 font-medium">✏️ Edit Mode: Fill in details below. Click "Switch to Preview" to see how it looks.</p>
+            </div>
 
             <div className="grid md:grid-cols-2 gap-4">
               <div>
