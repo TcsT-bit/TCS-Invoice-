@@ -9,6 +9,7 @@
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
   body { font-family: 'Inter', sans-serif; }
@@ -19,18 +20,25 @@
 <div id="root"></div>
 
 <script type="text/babel">
-const { useState, useRef } = React;
+const { useState, useRef, useEffect } = React;
 const { jsPDF } = window.jspdf;
 
 function App() {
   const invoiceRef = useRef();
-  const [mode, setMode] = useState('edit'); // start in edit mode so form shows
+  const [mode, setMode] = useState('edit');
+  const [sending, setSending] = useState(false);
+
+  // Initialize EmailJS - replace with your keys
+  useEffect(() => {
+    emailjs.init("YOUR_PUBLIC_KEY"); // Get free at emailjs.com
+  }, []);
+
   const [invoice, setInvoice] = useState({
     company: "Twinz Cooperate Services Pty Ltd",
     companyReg: "2024/444303/07",
     vatNo: "9819040198",
     companyAddress: "",
-    companyEmail: "",
+    companyEmail: "info@twinscooperate.co.za",
     companyPhone: "",
     bankName: "Standard Bank",
     accountNumber: "10 26 459 443 4",
@@ -48,12 +56,10 @@ function App() {
     clientPhone: "",
     clientAddress: "",
 
-    items: [{ desc: "", qty: 1, rate: 0 }],
+    items: [{ desc: "Consulting Services", qty: 1, rate: 0 }],
     taxRate: 15,
     notes: "Quotation accepted refer to Ts & Cs below",
     terms: `Storage fees are charged after 7 business days grace period following the completion of work and storage fee will also apply to clients who leave their vehicle on premises prior to the job after diagnostics have been performed.`,
-    signatureName: "",
-    signatureDate: "",
   });
 
   const handleItemChange = (i, field, value) => {
@@ -70,33 +76,72 @@ function App() {
   const total = subtotal + tax;
   const balanceDue = Math.max(0, total - invoice.receivedAmount);
 
-  const generatePDF = () => {
+  const generatePDFBlob = async () => {
     const doc = new jsPDF('p', 'mm', 'a4');
-    return doc.html(invoiceRef.current, {
-      x: 0, y: 0, width: 210, windowWidth: 800
-    }).then(() => doc);
+    await doc.html(invoiceRef.current, { x: 0, y: 0, width: 210, windowWidth: 800 });
+    return doc.output('blob');
   };
 
   const downloadPDF = async () => {
-    const doc = await generatePDF();
+    const doc = new jsPDF('p', 'mm', 'a4');
+    await doc.html(invoiceRef.current, { x: 0, y: 0, width: 210, windowWidth: 800 });
     doc.save(`${invoice.invoiceNumber}_Twinz_Cooperate_Services.pdf`);
   };
 
-  const shareWhatsApp = async () => {
-    const message = `Invoice ${invoice.invoiceNumber} from ${invoice.company}\nClient: ${invoice.clientName}\nAmount Due: ZAR ${balanceDue.toFixed(2)}`;
-    const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
-    window.open(url, '_blank');
-    alert("PDF will download. Attach it to the WhatsApp chat.");
-    await downloadPDF();
+  const sendEmail = async () => {
+    if (!invoice.clientEmail) {
+      alert("Enter client email first");
+      return;
+    }
+    setSending(true);
+    try {
+      const pdfBlob = await generatePDFBlob();
+
+      // Convert blob to base64 for EmailJS
+      const reader = new FileReader();
+      reader.readAsDataURL(pdfBlob);
+      reader.onloadend = async () => {
+        const base64data = reader.result;
+
+        await emailjs.send("YOUR_SERVICE_ID", "YOUR_TEMPLATE_ID", {
+          to_email: invoice.clientEmail,
+          to_name: invoice.clientName,
+          from_name: invoice.company,
+          invoice_number: invoice.invoiceNumber,
+          amount: balanceDue.toFixed(2),
+          message: `Please find attached invoice ${invoice.invoiceNumber}`,
+          attachment: base64data
+        });
+
+        alert("Invoice sent successfully to " + invoice.clientEmail);
+        setSending(false);
+      };
+    } catch (err) {
+      alert("Failed to send email: " + err.message);
+      setSending(false);
+    }
   };
 
-  const shareEmail = async () => {
-    const subject = `Invoice ${invoice.invoiceNumber} - ${invoice.company}`;
-    const body = `Dear ${invoice.clientName},\n\nPlease find attached invoice ${invoice.invoiceNumber} for ZAR ${balanceDue.toFixed(2)}.\n\nThank you,\n${invoice.company}`;
-    const mailto = `mailto:${invoice.clientEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailto;
-    alert("PDF will download. Attach it to the email.");
-    await downloadPDF();
+  const shareWhatsApp = async () => {
+    if (!navigator.share) {
+      alert("WhatsApp sharing works best on mobile. On desktop, use Download PDF then attach manually.");
+      await downloadPDF();
+      return;
+    }
+
+    try {
+      const pdfBlob = await generatePDFBlob();
+      const file = new File([pdfBlob], `Invoice-${invoice.invoiceNumber}.pdf`, { type: 'application/pdf' });
+
+      await navigator.share({
+        files: [file],
+        title: `Invoice ${invoice.invoiceNumber}`,
+        text: `Invoice from ${invoice.company} for ${invoice.clientName}. Amount due: ZAR ${balanceDue.toFixed(2)}`
+      });
+    } catch (err) {
+      // User cancelled or not supported
+      await downloadPDF();
+    }
   };
 
   const getStatusColor = () => {
@@ -120,13 +165,13 @@ function App() {
               className="px-4 py-2 rounded-lg bg-black text-white hover:bg-gray-800">
               Download PDF
             </button>
-            <button onClick={shareWhatsApp}
-              className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700">
+            <button onClick={shareWhatsApp} disabled={sending}
+              className="px-4 py-2 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50">
               Share WhatsApp
             </button>
-            <button onClick={shareEmail}
-              className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-              Send Email
+            <button onClick={sendEmail} disabled={sending}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+              {sending? "Sending..." : "Send Email"}
             </button>
           </div>
         </div>
@@ -135,7 +180,6 @@ function App() {
       {/* Invoice Card */}
       <div className="max-w-5xl mx-auto px-6">
         <div ref={invoiceRef} className="bg-white shadow-lg rounded-xl p-10">
-
           {/* Header */}
           <div className="flex flex-col md:flex-row justify-between items-start mb-8">
             <div className="flex items-start gap-4">
@@ -251,32 +295,15 @@ function App() {
             <p className="font-semibold mb-2">Terms & Conditions</p>
             <p className="text-sm text-gray-700 whitespace-pre-line">{invoice.terms}</p>
           </div>
-
-          {/* Signature */}
-          <div className="grid md:grid-cols-3 gap-8 pt-8 border-t">
-            <div>
-              <p className="text-sm text-gray-500">Name</p>
-              <p className="border-b border-gray-300 mt-4">{invoice.signatureName}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Date</p>
-              <p className="border-b border-gray-300 mt-4">{invoice.signatureDate}</p>
-            </div>
-            <div>
-              <p className="text-sm text-gray-500">Signature</p>
-              <p className="border-b border-gray-300 mt-4 h-8"></p>
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Edit Form - This is the "create" section */}
+      {/* Edit Form */}
       {mode === 'edit' && (
         <div className="max-w-5xl mx-auto px-6 mt-8 no-print">
           <div className="bg-white shadow rounded-xl p-6 space-y-6">
-
             <div className="bg-blue-50 border-blue-200 p-3 rounded-lg">
-              <p className="text-sm text-blue-800 font-medium">✏️ Edit Mode: Fill in details below. Click "Switch to Preview" to see how it looks.</p>
+              <p className="text-sm text-blue-800 font-medium">✏️ Edit Mode: Fill details below. Click "Switch to Preview" to see the final invoice.</p>
             </div>
 
             <div className="grid md:grid-cols-2 gap-4">
@@ -316,32 +343,6 @@ function App() {
               </div>
             </div>
 
-            {/* Bank Details */}
-            <div>
-              <h3 className="font-semibold mb-3">Bank Details</h3>
-              <div className="grid md:grid-cols-3 gap-4">
-                <input className="border p-2 rounded" placeholder="Bank" value={invoice.bankName}
-                  onChange={e => setInvoice({...invoice, bankName: e.target.value})} />
-                <input className="border p-2 rounded" placeholder="Account Number" value={invoice.accountNumber}
-                  onChange={e => setInvoice({...invoice, accountNumber: e.target.value})} />
-                <input className="border p-2 rounded" placeholder="Branch Code" value={invoice.branchCode}
-                  onChange={e => setInvoice({...invoice, branchCode: e.target.value})} />
-              </div>
-            </div>
-
-            {/* Invoice Details */}
-            <div>
-              <h3 className="font-semibold mb-3">Invoice Details</h3>
-              <div className="grid md:grid-cols-4 gap-4">
-                <input className="border p-2 rounded" placeholder="Invoice #" value={invoice.invoiceNumber}
-                  onChange={e => setInvoice({...invoice, invoiceNumber: e.target.value})} />
-                <input type="date" className="border p-2 rounded" value={invoice.invoiceDate}
-                  onChange={e => setInvoice({...invoice, invoiceDate: e.target.value})} />
-                <input type="date" className="border p-2 rounded" value={invoice.dueDate}
-                  onChange={e => setInvoice({...invoice, dueDate: e.target.value})} />
-              </div>
-            </div>
-
             {/* Client Details */}
             <div>
               <h3 className="font-semibold mb-3">Client Details</h3>
@@ -376,16 +377,6 @@ function App() {
               ))}
               <button onClick={addItem} className="text-blue-600 font-medium">+ Add Item</button>
             </div>
-
-            {/* Terms */}
-            <div>
-              <h3 className="font-semibold mb-3">Notes & Terms</h3>
-              <textarea className="border p-2 rounded w-full mb-2" rows="2" value={invoice.notes}
-                onChange={e => setInvoice({...invoice, notes: e.target.value})} />
-              <textarea className="border p-2 rounded w-full" rows="4" value={invoice.terms}
-                onChange={e => setInvoice({...invoice, terms: e.target.value})} />
-            </div>
-
           </div>
         </div>
       )}
