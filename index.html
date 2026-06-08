@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Twinz Cooperate Services Pty Ltd - Invoice Generator</title>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body class="bg-gray-50">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState } = React;
+const { jsPDF } = window.jspdf;
+
+function App() {
+  const [invoice, setInvoice] = useState({
+    company: "Twinz Cooperate Services Pty Ltd",
+    companyReg: "",
+    companyAddress: "",
+    companyEmail: "",
+    companyPhone: "",
+    invoiceNumber: "INV-001",
+    invoiceDate: new Date().toISOString().split("T")[0],
+    dueDate: "",
+    clientName: "",
+    clientEmail: "",
+    clientAddress: "",
+    items: [{ desc: "", qty: 1, rate: 0 }],
+    taxRate: 15,
+    notes: "Thank you for your business!"
+  });
+
+  const handleItemChange = (i, field, value) => {
+    const newItems = [...invoice.items];
+    newItems[i][field] = field === "desc"? value : Number(value);
+    setInvoice({...invoice, items: newItems });
+  };
+
+  const addItem = () => {
+    setInvoice({...invoice, items: [...invoice.items, { desc: "", qty: 1, rate: 0 }] });
+  };
+
+  const removeItem = (i) => {
+    setInvoice({...invoice, items: invoice.items.filter((_, idx) => idx!== i) });
+  };
+
+  const subtotal = invoice.items.reduce((sum, i) => sum + i.qty * i.rate, 0);
+  const tax = subtotal * (invoice.taxRate / 100);
+  const total = subtotal + tax;
+
+  const downloadPDF = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(18);
+    doc.text(invoice.company, 14, 20);
+    doc.setFontSize(10);
+    doc.text([
+      invoice.companyAddress,
+      `Reg: ${invoice.companyReg}`,
+      `Email: ${invoice.companyEmail}`,
+      `Phone: ${invoice.companyPhone}`
+    ], 14, 28);
+
+    doc.setFontSize(20);
+    doc.text("INVOICE", 180, 20, { align: "right" });
+    doc.setFontSize(10);
+    doc.text([
+      `Invoice #: ${invoice.invoiceNumber}`,
+      `Date: ${invoice.invoiceDate}`,
+      `Due Date: ${invoice.dueDate}`
+    ], 180, 28, { align: "right" });
+
+    doc.text("Bill To:", 14, 60);
+    doc.text([
+      invoice.clientName,
+      invoice.clientAddress,
+      invoice.clientEmail
+    ], 14, 66);
+
+    // Table header
+    let y = 90;
+    doc.setFillColor(240, 240, 240);
+    doc.rect(14, y, 182, 8, "F");
+    doc.text("Description", 16, y + 6);
+    doc.text("Qty", 120, y + 6, { align: "right" });
+    doc.text("Rate", 150, y + 6, { align: "right" });
+    doc.text("Amount", 190, y + 6, { align: "right" });
+
+    // Table rows
+    y += 10;
+    invoice.items.forEach(item => {
+      const amount = item.qty * item.rate;
+      doc.text(item.desc, 16, y);
+      doc.text(String(item.qty), 120, y, { align: "right" });
+      doc.text(`ZAR ${item.rate.toFixed(2)}`, 150, y, { align: "right" });
+      doc.text(`ZAR ${amount.toFixed(2)}`, 190, y, { align: "right" });
+      y += 8;
+    });
+
+    // Totals
+    y += 5;
+    doc.line(120, y, 196, y);
+    y += 6;
+    doc.text("Subtotal:", 150, y, { align: "right" });
+    doc.text(`ZAR ${subtotal.toFixed(2)}`, 190, y, { align: "right" });
+    y += 6;
+    doc.text(`VAT ${invoice.taxRate}%:`, 150, y, { align: "right" });
+    doc.text(`ZAR ${tax.toFixed(2)}`, 190, y, { align: "right" });
+    y += 6;
+    doc.setFontSize(12);
+    doc.text("Total:", 150, y, { align: "right" });
+    doc.text(`ZAR ${total.toFixed(2)}`, 190, y, { align: "right" });
+
+    // Notes
+    y += 15;
+    doc.setFontSize(10);
+    doc.text("Notes:", 14, y);
+    doc.text(invoice.notes, 14, y + 6);
+
+    doc.save(`${invoice.invoiceNumber}_Twinz_Cooperate_Services.pdf`);
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto p-6 bg-white min-h-screen">
+      <h1 className="text-3xl font-bold mb-2">Twinz Cooperate Services Pty Ltd</h1>
+      <p className="text-gray-600 mb-6">Invoice Generator</p>
+
+      {/* Company Info */}
+      <div className="bg-gray-50 p-4 rounded-lg mb-6">
+        <h2 className="font-semibold mb-3">Your Company Details</h2>
+        <div className="grid md:grid-cols-2 gap-4">
+          <input placeholder="Company Name" value={invoice.company}
+            onChange={e => setInvoice({...invoice, company: e.target.value })}
+            className="border p-2 rounded" />
+          <input placeholder="Company Reg No" value={invoice.companyReg}
+            onChange={e => setInvoice({...invoice, companyReg: e.target.value })}
+            className="border p-2 rounded" />
+          <input placeholder="Company Address" value={invoice.companyAddress}
+            onChange={e => setInvoice({...invoice, companyAddress: e.target.value })}
+            className="border p-2 rounded md:col-span-2" />
+          <input placeholder="Email" type="email" value={invoice.companyEmail}
+            onChange={e => setInvoice({...invoice, companyEmail: e.target.value })}
+            className="border p-2 rounded" />
+          <input placeholder="Phone" value={invoice.companyPhone}
+            onChange={e => setInvoice({...invoice, companyPhone: e.target.value })}
+            className="border p-2 rounded" />
+        </div>
+      </div>
+
+      {/* Invoice Info */}
+      <div className="bg-gray-50 p-4 rounded-lg mb-6">
+        <h2 className="font-semibold mb-3">Invoice Details</h2>
+        <div className="grid md:grid-cols-3 gap-4">
+          <input placeholder="Invoice Number" value={invoice.invoiceNumber}
+            onChange={e => setInvoice({...invoice, invoiceNumber: e.target.value })}
+            className="border p-2 rounded" />
+          <input type="date" value={invoice.invoiceDate}
+            onChange={e => setInvoice({...invoice, invoiceDate: e.target.value })}
+            className="border p-2 rounded" />
+          <input type="date" placeholder="Due Date" value={invoice.dueDate}
+            onChange={e => setInvoice({...invoice, dueDate: e.target.value })}
+            className="border p-2 rounded" />
+        </div>
+      </div>
+
+      {/* Client Info */}
+      <div className="bg-gray-50 p-4 rounded-lg mb-6">
+        <h2 className="font-semibold mb-3">Bill To</h2>
+        <div className="grid md:grid-cols-2 gap-4">
+          <input placeholder="Client Name" value={invoice.clientName}
+            onChange={e => setInvoice({...invoice, clientName: e.target.value })}
+            className="border p-2 rounded" />
+          <input placeholder="Client Email" type="email" value={invoice.clientEmail}
+            onChange={e => setInvoice({...invoice, clientEmail: e.target.value })}
+            className="border p-2 rounded" />
+          <input placeholder="Client Address" value={invoice.clientAddress}
+            onChange={e => setInvoice({...invoice, clientAddress: e.target.value })}
+            className="border p-2 rounded md:col-span-2" />
+        </div>
+      </div>
+
+      {/* Items */}
+      <div className="mb-6">
+        <h2 className="font-semibold mb-2">Items</h2>
+        <div className="hidden md:grid grid-cols-12 gap-2 mb-2 text-sm text-gray-600">
+          <div className="col-span-6">Description</div>
+          <div className="col-span-2">Qty</div>
+          <div className="col-span-3">Rate (ZAR)</div>
+          <div className="col-span-1"></div>
+        </div>
+        {invoice.items.map((item, i) => (
+          <div key={i} className="grid md:grid-cols-12 gap-2 mb-2">
+            <input placeholder="Description" value={item.desc}
+              onChange={e => handleItemChange(i, "desc", e.target.value)}
+              className="border p-2 rounded md:col-span-6" />
+            <input type="number" min="0" placeholder="Qty" value={item.qty}
+              onChange={e => handleItemChange(i, "qty", e.target.value)}
+              className="border p-2 rounded md:col-span-2" />
+            <input type="number" min="0" step="0.01" placeholder="Rate" value={item.rate}
+              onChange={e => handleItemChange(i, "rate", e.target.value)}
+              className="border p-2 rounded md:col-span-3" />
+            <button onClick={() => removeItem(i)}
+              className="bg-red-500 text-white rounded px-2 hover:bg-red-600">X</button>
+          </div>
+        ))}
+        <button onClick={addItem} className="text-blue-600 font-medium hover:underline">+ Add Item</button>
+      </div>
+
+      {/* Tax & Totals */}
+      <div className="flex flex-col md:flex-row justify-between gap-6 mb-6">
+        <div>
+          <label className="block text-sm text-gray-600 mb-1">VAT Rate %</label>
+          <input type="number" value={invoice.taxRate}
+            onChange={e => setInvoice({...invoice, taxRate: Number(e.target.value) })}
+            className="border p-2 rounded w-32" />
+        </div>
+        <div className="w-full md:w-64 bg-gray-50 p-4 rounded-lg">
+          <div className="flex justify-between py-1">
+            <span>Subtotal:</span>
+            <span>ZAR {subtotal.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between py-1">
+            <span>VAT {invoice.taxRate}%:</span>
+            <span>ZAR {tax.toFixed(2)}</span>
+          </div>
+          <div className="flex justify-between py-2 font-bold border-t mt-2">
+            <span>Total:</span>
+            <span>ZAR {total.toFixed(2)}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Notes */}
+      <div className="mb-6">
+        <label className="block text-sm text-gray-600 mb-1">Notes</label>
+        <textarea placeholder="Notes" value={invoice.notes}
+          onChange={e => setInvoice({...invoice, notes: e.target.value })}
+          className="border p-2 rounded w-full" rows="3" />
+      </div>
+
+      <button onClick={downloadPDF}
+        className="w-full md:w-auto bg-black text-white px-6 py-3 rounded-lg font-medium hover:bg-gray-800">
+        Download PDF Invoice
+      </button>
+    </div>
+  );
+}
+
+ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+  </html>
